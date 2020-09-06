@@ -1,51 +1,82 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Error } from 'mongoose';
 import { Product } from './products.model'
 
 @Injectable()
 export class ProductsService {
-    private products: Product[] = [];
 
-    insertProduct(title: string, description: string, price: number) {
-        const prodId = new Date().getTime().toString();
-        const newProduct = new Product(prodId, title, description, price);
-        this.products.push(newProduct);
-        return prodId;
-    }
+    constructor(
+        @InjectModel('Product') private readonly productModel: Model<Product>,
+      ) {}
 
-    getProducts() {
-        return [...this.products];
-    }
-
-    getProduct(id: string) {
-        const product = this.findProduct(id);
-        return { ...product } ;
-    }
-
-    updateProduct(id: string, title: string, description: string, price: number) {
-        let product = this.findProduct(id);
-        if(title) {
-            product.title = title;
-        }
-        if(description) {
-            product.description = description;
-        }
-        if(price) {
-            product.price = price;
-        }
+    async insertProduct(title: string, description: string, price: number) {
+        let product = new this.productModel({
+            title,
+            description,
+            price
+        });
+        product = await product.save();
         return product;
     }
 
-    deleteProduct(id: string) {
-        let product = this.findProduct(id);
-        this.products = this.products.filter((prod) => prod.id != id);
+    async getProducts() {
+        const products = await this.productModel.find().select('-__v').exec();
+        return products;
     }
 
-    private findProduct(id: string) {
-        const product = this.products.find((prod) => prod.id === id);
-        if(!product) {
-            throw new NotFoundException('Could not found product.');
+    async getProduct(id: string) {
+        const product = await this.findProduct(id);
+        return product ;
+    }
+
+    async updateProduct(id: string, title: string, description: string, price: number) {
+        const updateProduct = {
+            ...title && {title},
+            ...description && {description},
+            ...price && {price}   
+        };
+        try {
+            const options = { new: true };
+            const product = await this.productModel.findByIdAndUpdate(id, updateProduct, options).select('-__v');
+            if(!product) {
+                throw new NotFoundException('Could not found product.');
+            }
+            return product;
+        } catch (error) {
+            if(error instanceof Error.CastError) {
+                throw new BadRequestException('Invalid product id.');
+            }
+            throw error
         }
-        return product;
     }
 
+    async deleteProduct(id: string) {
+        try {
+            const product = await this.productModel.findByIdAndDelete(id);
+            if(!product) {
+                throw new NotFoundException('Could not found product.');
+            }   
+        } catch (error) {
+            if(error instanceof Error.CastError) {
+                throw new BadRequestException('Invalid product id.');
+            }
+            throw error;
+        }
+    }
+
+    private async findProduct(id: string) {
+        try {
+            const product = await this.productModel.findById(id).select('-__v');
+            if(!product) {
+                throw new NotFoundException('Could not found product.');
+            }
+            return product;
+        } catch(error) {
+            if(error instanceof Error.CastError) {
+                throw new BadRequestException('Invalid product id.');
+            }
+            throw error;
+        }
+    }
 }
